@@ -1,9 +1,240 @@
 from enum import Enum
 from queue import PriorityQueue
 import numpy as np
+from shapely.geometry import Polygon, Point, LineString
+from sklearn.neighbors import KDTree
+import matplotlib.pyplot as plt
+import networkx as nx
+from tqdm import tqdm 
+
+NUM_SAMPLES = 200
+VALID_CONNECTIONS = 10
+TARGET_ALTITUDE = 5
+SAFETY_DISTANCE = 5
+K = 10
+
+def create_graph(data):
+    print('creating graph')
+    xmin = np.floor(np.min(data[:, 0] - data[:, 3]))
+    xmax = np.ceil(np.max(data[:, 0] + data[:, 3]))
+
+    ymin = np.floor(np.min(data[:, 1] - data[:, 4]))
+    ymax = np.ceil(np.max(data[:, 1] + data[:, 4]))   
+
+    zmin = 0
+    zmax = 2 * TARGET_ALTITUDE
+    samples = get_samples(data, xmin, xmax, ymin, ymax, zmin, zmax)
+
+    obstacle_dict = {}
+    d_north_max = 0
+    d_east_max = 0
+    max_area = 0
+    for i in range (data.shape[0]):
+        north, east, alt, d_north, d_east, d_alt = data[i, :]
+        corner1 = (north - d_north, east - d_east)
+        corner2 = (north + d_north, east - d_east)
+        corner3 = (north + d_north, east + d_east)
+        corner4 = (north - d_north, east + d_east)
+
+        corners = [corner1, corner2, corner3, corner4]
+        height = alt + d_alt
+
+        p = Polygon(corners)
+        obstacle_dict[(north, east, alt)] = (p, height) 
+
+        area = p.area
+        if area > max_area:
+            d_north_max = d_north
+            d_east_max = d_east
+            max_area = area
+
+    max_radius = np.sqrt(d_north_max**2 + d_east_max**2)
+    obstacle_tree = KDTree(list(obstacle_dict.keys()))
+
+    valid_nodes = []
+    for s in samples:
+        obstacles = find_closest_obstacles(s, obstacle_tree, max_radius, obstacle_dict)
+        if not collides_with(s, obstacles):
+            valid_nodes.append(s)
+
+    node_tree = KDTree(valid_nodes)
+    graph = nx.Graph()
+    print(f'attempting to connect {len(valid_nodes)} nodes to each other...')
+    for n1 in tqdm(valid_nodes):
+        valid_connections = 0 
+        neighbors = node_tree.query([n1], K, return_distance=False)[0]
+        for n in neighbors:
+            n2 = valid_nodes[n]
+            if n2 == n1:
+                continue
+            distance = np.linalg.norm(np.array(n1) - np.array(n2))
+            search_radius = 0.5*distance + max_radius
+            mid_point = find_mid_point(n1,n2)
+            obstacles = find_closest_obstacles(mid_point, obstacle_tree, search_radius, obstacle_dict)
+
+            if can_connect(n1, n2, obstacles):
+                valid_connections += 1
+                graph.add_edge(n1, n2, weight=distance)
+            if valid_connections == VALID_CONNECTIONS:
+                break
+        #else:
+        #    print(f'only found {valid_connections} connections')
+    print(f'number of edges {graph.number_of_edges()}')
+    return graph, xmin, ymin, xmax, ymax, zmax, obstacle_tree, obstacle_dict, max_radius, valid_nodes
+
+def visualize_graph(data, start, goal, graph, valid_nodes):
+    grid, _, _ = create_grid(data)     
+    fig = plt.figure()
+
+    plt.imshow(grid, cmap='Greys', origin='lower')
+
+    nmin = np.min(data[:, 0])
+    emin = np.min(data[:, 1])
+
+    # draw edges
+    for (n1, n2) in graph.edges:
+        plt.plot([n1[1] - emin, n2[1] - emin], [n1[0] - nmin, n2[0] - nmin], 'black' , alpha=0.5)
+
+    # draw all nodes
+    for n1 in valid_nodes:
+        plt.scatter(n1[1] - emin, n1[0] - nmin, c='blue')
+
+    # draw connected nodes
+    for n1 in graph.nodes:
+        plt.scatter(n1[1] - emin, n1[0] - nmin, c='red')
+
+    # draw start and goal
+    plt.scatter(start[0], start[1], c='green')
+    plt.scatter(goal[0] - nmin, goal[1] - emin, c='yellow')
+
+    plt.xlabel('NORTH')
+    plt.ylabel('EAST')
+
+    plt.show()
+
+def find_closest_obstacles(node, obstacle_tree, radius, obstacle_dict):
+    obstacles = []
+    potential_obstacles = obstacle_tree.query_radius([node], radius, return_distance=False)[0]
+    for ob in potential_obstacles:
+        key_list = list(obstacle_dict.keys())
+        obstacle_center = tuple(key_list[ob])
+        obstacles.append(obstacle_dict[obstacle_center])
+    
+    return obstacles
+
+def collides_with(node, obstacles):
+    for (p, height) in obstacles:
+        if p.contains(Point(node)) and height >= node[2]:
+            return True
+    return False   
+
+def can_connect(n1, n2, obstacles):
+    line = LineString([n1,n2])
+    for (p, height) in obstacles:
+        if p.crosses(line) and height >= min(n1[2],n2[2]):
+            return False
+    return True
+
+def find_mid_point(n1,n2):
+    x = (n1[0] + n2[0]) / 2
+    y = (n1[1] + n2[1]) / 2
+    z = (n1[2] + n2[2]) / 2
+
+    return [x,y,z]
+
+def get_samples(data, xmin, xmax, ymin, ymax, zmin, zmax):
+    xvals = np.random.uniform(xmin, xmax, NUM_SAMPLES)
+    yvals = np.random.uniform(ymin, ymax, NUM_SAMPLES)
+    zvals = np.random.uniform(zmin, zmax, NUM_SAMPLES)
+    samples = list(zip(xvals, yvals, zvals))
+
+    return samples
+
+def closest_node(graph, point):
+    dist = 10000
+    closest = None
+    for node in graph.nodes():
+        d = np.linalg.norm(np.array(node) - np.array(point))
+        if d < dist:
+            dist = d
+            closest = node
+    return closest
+
+def prune_path(path, obstacle_tree, obstacle_dict, max_radius):
+    print('pruning path')
+    pruned_path = [p for p in path]
+    i = 0
+    while i < len(pruned_path) - 2:
+        n1 = pruned_path[i]
+        n2 = pruned_path[i+1]
+        n3 = pruned_path[i+2]
+
+        distance = np.linalg.norm(np.array(n1) - np.array(n3))
+        search_radius = 0.5*distance + max_radius
+        mid_point = find_mid_point(n1,n3)
+        obstacles = find_closest_obstacles(mid_point, obstacle_tree, search_radius, obstacle_dict)
+        if can_connect(n1,n3, obstacles):
+            pruned_path.remove(pruned_path[i+1])
+        else:
+            i += 1
+    print(f'pruned_path from {len(path)} to {len(pruned_path)}')        
+    return pruned_path
+
+def a_star_graph(graph, h, start, goal):
+    print('running a_star')
+    path = []
+    queue = PriorityQueue()
+    queue.put((0, start))
+    visited = set(start)
+
+    branch = {}
+    found = False
+    
+    if start == goal:
+        print(f'START {start} = GOAL {goal}')
+    while not queue.empty():
+        print(f'queue length: {queue.qsize()}')
+        item = queue.get()
+        current_cost, current_node = item
+        if current_node == goal:        
+            print('Found a path.')
+            found = True
+            break
+        else:
+            for next_node in graph[current_node]:
+                cost =  graph.edges[current_node, next_node]['weight']
+                new_cost = cost + current_cost + h(next_node, goal)
+                
+                if next_node not in visited:                
+                    visited.add(next_node)  
+                    queue.put((new_cost, next_node))             
+                    branch[next_node] = (new_cost, current_node)
+                    
+             
+    if found:
+        # retrace steps
+        n = goal
+        path_cost = branch[n][0]
+        path.append(goal)
+        while branch[n][1] != start:
+            path.append(branch[n][1])
+            n = branch[n][1]
+        path.append(branch[n][1])
+    else:
+        print('**********************')
+        print('Failed to find a path!')
+        print('**********************') 
+        return None, None
+    return path[::-1], path_cost
 
 
-def create_grid(data, drone_altitude, safety_distance):
+
+
+
+
+
+
+def create_grid(data):
     """
     Returns a grid representation of a 2D configuration space
     based on given obstacle data, drone altitude and safety distance
@@ -29,12 +260,12 @@ def create_grid(data, drone_altitude, safety_distance):
     # Populate the grid with obstacles
     for i in range(data.shape[0]):
         north, east, alt, d_north, d_east, d_alt = data[i, :]
-        if alt + d_alt + safety_distance > drone_altitude:
+        if alt + d_alt + SAFETY_DISTANCE > TARGET_ALTITUDE:
             obstacle = [
-                int(np.clip(north - d_north - safety_distance - north_min, 0, north_size-1)),
-                int(np.clip(north + d_north + safety_distance - north_min, 0, north_size-1)),
-                int(np.clip(east - d_east - safety_distance - east_min, 0, east_size-1)),
-                int(np.clip(east + d_east + safety_distance - east_min, 0, east_size-1)),
+                int(np.clip(north - d_north - SAFETY_DISTANCE - north_min, 0, north_size-1)),
+                int(np.clip(north + d_north + SAFETY_DISTANCE - north_min, 0, north_size-1)),
+                int(np.clip(east - d_east - SAFETY_DISTANCE - east_min, 0, east_size-1)),
+                int(np.clip(east + d_east + SAFETY_DISTANCE - east_min, 0, east_size-1)),
             ]
             grid[obstacle[0]:obstacle[1]+1, obstacle[2]:obstacle[3]+1] = 1
 
@@ -86,7 +317,6 @@ def valid_actions(grid, current_node):
         valid_actions.remove(Action.EAST)
 
     return valid_actions
-
 
 def a_star(grid, h, start, goal):
 
