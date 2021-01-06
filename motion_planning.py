@@ -4,7 +4,7 @@ import msgpack
 from enum import Enum, auto
 
 import numpy as np
-from planning_utils import a_star_graph, heuristic, create_grid, create_graph, prune_path, closest_node, visualize_graph
+from planning_utils import a_star_graph, heuristic, create_grid, create_graph, prune_path, closest_node, visualize_graph, visualize_path
 from udacidrone import Drone
 from udacidrone.connection import MavlinkConnection
 from udacidrone.messaging import MsgID
@@ -135,9 +135,9 @@ class MotionPlanning(Drone):
 
         graph, xmin, ymin, xmax, ymax, zmax, obstacle_tree, obstacle_dict, max_radius, valid_nodes = create_graph(data)
         graph_start = closest_node(graph, self.local_position)
-        graph_goal = closest_node(graph, [np.random.randint(0, xmax),
-                                         np.random.randint(0, ymax),
-                                         np.random.randint(0, zmax)])
+        graph_goal = closest_node(graph, [np.random.uniform(0, xmax),
+                                         np.random.uniform(0, ymax),
+                                         np.random.uniform(0, zmax)])
 
         #visualize_graph(data, graph_start, graph_goal, graph, valid_nodes)
 
@@ -163,6 +163,7 @@ class MotionPlanning(Drone):
         path, _ = a_star_graph(graph, heuristic, graph_start, graph_goal)
         #path, _ = a_star(grid, heuristic, grid_start, grid_goal)
         pruned_path = prune_path(path, obstacle_tree, obstacle_dict, max_radius)
+        #visualize_path(data, graph, pruned_path, graph_start, graph_goal)
         # TODO: prune path to minimize number of waypoints
         # TODO (if you're feeling ambitious): Try a different approach altogether!
 
@@ -194,7 +195,7 @@ if __name__ == "__main__":
     parser.add_argument('--host', type=str, default='127.0.0.1', help="host address, i.e. '127.0.0.1'")
     args = parser.parse_args()
 
-    conn = MavlinkConnection('tcp:{0}:{1}'.format(args.host, args.port), timeout=60)
+    conn = MavlinkConnection('tcp:{0}:{1}'.format(args.host, args.port), timeout=6000)
     drone = MotionPlanning(conn)
     time.sleep(1)
 
