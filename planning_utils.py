@@ -8,7 +8,6 @@ import networkx as nx
 from tqdm import tqdm 
 
 NUM_SAMPLES = 200
-VALID_CONNECTIONS = 10
 TARGET_ALTITUDE = 5
 SAFETY_DISTANCE = 5
 K = 10
@@ -61,13 +60,9 @@ def create_graph(data):
     graph = nx.Graph()
     print(f'attempting to connect {len(valid_nodes)} nodes to each other...')
     for n1 in tqdm(valid_nodes):
-        valid_connections = 0 
-
-        #search_radius
-
         neighbors = node_tree.query([n1], K, return_distance=False)[0]
-        for n in neighbors:
-            n2 = valid_nodes[n]
+        for index in neighbors:
+            n2 = valid_nodes[index]
             if n2 == n1:
                 continue
             distance = np.linalg.norm(np.array(n1) - np.array(n2))
@@ -76,75 +71,10 @@ def create_graph(data):
             obstacles = find_closest_obstacles(mid_point, obstacle_tree, search_radius, obstacle_dict)
 
             if can_connect(n1, n2, obstacles):
-                valid_connections += 1
                 graph.add_edge(n1, n2, weight=distance)
-            if valid_connections == VALID_CONNECTIONS:
-                break
-        #else:
-        #    print(f'only found {valid_connections} connections')
+
     print(f'number of edges {graph.number_of_edges()}')
     return graph, xmin, ymin, xmax, ymax, zmax, obstacle_tree, obstacle_dict, max_radius, valid_nodes
-
-def visualize_path(data, graph, pruned_path, start, goal):
-    grid, _, _ = create_grid(data) 
-    fig = plt.figure()
-
-    plt.imshow(grid, cmap='Greys', origin='lower')
-
-    nmin = np.min(data[:, 0])
-    emin = np.min(data[:, 1])
-
-    plt.scatter(start[0] - nmin, start[1] - emin, c='pink')
-    plt.scatter(goal[0] - nmin, goal[1] - emin, c='yellow')
-
-    # draw nodes
-    for n1 in graph.nodes:
-        plt.scatter(n1[1] - emin, n1[0] - nmin, c='red')
-        
-    # draw edges
-    for (n1, n2) in graph.edges:
-        plt.plot([n1[1] - emin, n2[1] - emin], [n1[0] - nmin, n2[0] - nmin], 'black')
-        
-    # TODO: add code to visualize the path
-    path_pairs = zip(pruned_path[:-1], pruned_path[1:])
-    for (n1, n2) in path_pairs:
-        plt.plot([n1[1] - emin, n2[1] - emin], [n1[0] - nmin, n2[0] - nmin], 'blue')
-
-
-    plt.xlabel('NORTH')
-    plt.ylabel('EAST')
-
-    plt.show()
-
-def visualize_graph(data, start, goal, graph, valid_nodes):
-    grid, _, _ = create_grid(data)     
-    fig = plt.figure()
-
-    plt.imshow(grid, cmap='Greys', origin='lower')
-
-    nmin = np.min(data[:, 0])
-    emin = np.min(data[:, 1])
-
-    # draw edges
-    for (n1, n2) in graph.edges:
-        plt.plot([n1[1] - emin, n2[1] - emin], [n1[0] - nmin, n2[0] - nmin], 'black' , alpha=0.5)
-
-    # draw all nodes
-    for n1 in valid_nodes:
-        plt.scatter(n1[1] - emin, n1[0] - nmin, c='blue')
-
-    # draw connected nodes
-    for n1 in graph.nodes:
-        plt.scatter(n1[1] - emin, n1[0] - nmin, c='red')
-
-    # draw start and goal
-    plt.scatter(start[0], start[1], c='pink')
-    plt.scatter(goal[0] - nmin, goal[1] - emin, c='yellow')
-
-    plt.xlabel('NORTH')
-    plt.ylabel('EAST')
-
-    plt.show()
 
 def find_closest_obstacles(node, obstacle_tree, radius, obstacle_dict):
     obstacles = []
@@ -261,9 +191,66 @@ def a_star_graph(graph, h, start, goal):
         return None, None
     return path[::-1], path_cost
 
+def visualize_path(data, graph, pruned_path, start, goal):
+    grid, _, _ = create_grid(data) 
+    fig = plt.figure()
+
+    plt.imshow(grid, cmap='Greys', origin='lower')
+
+    nmin = np.min(data[:, 0])
+    emin = np.min(data[:, 1])
+
+    plt.scatter(start[0] - nmin, start[1] - emin, c='pink')
+    plt.scatter(goal[0] - nmin, goal[1] - emin, c='yellow')
+
+    # draw nodes
+    for n1 in graph.nodes:
+        plt.scatter(n1[1] - emin, n1[0] - nmin, c='red')
+        
+    # draw edges
+    for (n1, n2) in graph.edges:
+        plt.plot([n1[1] - emin, n2[1] - emin], [n1[0] - nmin, n2[0] - nmin], 'black')
+        
+    # TODO: add code to visualize the path
+    path_pairs = zip(pruned_path[:-1], pruned_path[1:])
+    for (n1, n2) in path_pairs:
+        plt.plot([n1[1] - emin, n2[1] - emin], [n1[0] - nmin, n2[0] - nmin], 'blue')
 
 
+    plt.xlabel('NORTH')
+    plt.ylabel('EAST')
 
+    plt.show()
+
+def visualize_graph(data, start, goal, graph, valid_nodes):
+    grid, _, _ = create_grid(data)     
+    fig = plt.figure()
+
+    plt.imshow(grid, cmap='Greys', origin='lower')
+
+    nmin = np.min(data[:, 0])
+    emin = np.min(data[:, 1])
+
+    # draw edges
+    for (n1, n2) in graph.edges:
+        plt.plot([n1[1] - emin, n2[1] - emin], [n1[0] - nmin, n2[0] - nmin], 'black' , alpha=0.5)
+
+    # draw all nodes
+    for n1 in valid_nodes:
+        plt.scatter(n1[1] - emin, n1[0] - nmin, c='blue')
+
+    # draw connected nodes
+    for n1 in graph.nodes:
+        plt.scatter(n1[1] - emin, n1[0] - nmin, c='red')
+
+    # draw start and goal
+    plt.scatter(start[0], start[1], c='pink')
+    plt.scatter(goal[0] - nmin, goal[1] - emin, c='yellow')
+
+    plt.xlabel('NORTH')
+    plt.ylabel('EAST')
+
+    plt.show()
 
 
 

@@ -10,7 +10,6 @@ from udacidrone.connection import MavlinkConnection
 from udacidrone.messaging import MsgID
 from udacidrone.frame_utils import global_to_local
 
-K = 10
 
 class States(Enum):
     MANUAL = auto()
@@ -115,7 +114,6 @@ class MotionPlanning(Drone):
         self.flight_state = States.PLANNING
         print("Searching for a path ...")
         TARGET_ALTITUDE = 5
-        SAFETY_DISTANCE = 5
 
         self.target_position[2] = TARGET_ALTITUDE
         with open('colliders.csv') as f:
@@ -123,6 +121,7 @@ class MotionPlanning(Drone):
             lat0, lon0 = float(lat_lon_data[1].strip(',')), float(lat_lon_data[3])
             self.set_home_position(lon0, lat0, 0)
         north_home, east_home, down_home = global_to_local(self.global_position, self.global_home)
+
         # TODO: read lat0, lon0 from colliders into floating point values
         # TODO: set home position to (lon0, lat0, 0)
         # TODO: retrieve current global position
@@ -159,10 +158,11 @@ class MotionPlanning(Drone):
         # Run A* to find a path from start to goal
         # TODO: add diagonal motions with a cost of sqrt(2) to your A* implementation
         # or move to a different search space such as a graph (not done here)
+
         print('Local Start and Goal: ', graph_start, graph_goal)
         path, _ = a_star_graph(graph, heuristic, graph_start, graph_goal)
-        #path, _ = a_star(grid, heuristic, grid_start, grid_goal)
         pruned_path = prune_path(path, obstacle_tree, obstacle_dict, max_radius)
+        
         #visualize_path(data, graph, pruned_path, graph_start, graph_goal)
         # TODO: prune path to minimize number of waypoints
         # TODO (if you're feeling ambitious): Try a different approach altogether!
@@ -195,7 +195,7 @@ if __name__ == "__main__":
     parser.add_argument('--host', type=str, default='127.0.0.1', help="host address, i.e. '127.0.0.1'")
     args = parser.parse_args()
 
-    conn = MavlinkConnection('tcp:{0}:{1}'.format(args.host, args.port), timeout=6000)
+    conn = MavlinkConnection('tcp:{0}:{1}'.format(args.host, args.port), timeout=60)
     drone = MotionPlanning(conn)
     time.sleep(1)
 
